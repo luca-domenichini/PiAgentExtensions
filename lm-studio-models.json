@@ -11,6 +11,9 @@
     },
     "google/gemma-4-e4b": {
       "contextWindow": 117000
+    },
+    "thinkingcap-qwen3.6-27b-mtp": {
+      "contextWindow": 65536
     }
   }
 }
