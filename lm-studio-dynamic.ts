@@ -156,6 +156,22 @@ export default async function (pi: ExtensionAPI) {
       lmStudioProvider.models = [];
     }
 
+    // Build a set of current chat model IDs from LM Studio
+    const currentModelIds = new Set(chatModels.map((m) => m.id));
+
+    // ── 3b. Remove models no longer provided by LM Studio ────────────
+    const removedModels = lmStudioProvider.models.filter(
+      (m) => !currentModelIds.has(m.id)
+    );
+    if (removedModels.length > 0) {
+      lmStudioProvider.models = lmStudioProvider.models.filter((m) =>
+        currentModelIds.has(m.id)
+      );
+      console.log(
+        `[lm-studio-dynamic] Removed ${removedModels.length} stale model(s) no longer in LM Studio: ${removedModels.map((m) => m.id).join(", ")}`
+      );
+    }
+
     // Index existing model entries by id for fast lookup
     const existingModelMap = new Map<string, ProviderModelEntry>(
       lmStudioProvider.models.map((m) => [m.id, m])
