@@ -258,6 +258,19 @@ function updateStatusBar(
 // Extension entry point
 // ---------------------------------------------------------------------------
 export default function (pi: ExtensionAPI) {
+	// Display model cost on session start (first load, reload, new session, resume, fork)
+	pi.on("session_start", async (event, ctx) => {
+		const model = ctx.model;
+		if (!model) {
+			ctx.ui.setStatus("model-cost", "🤖 No model selected");
+			return;
+		}
+
+		const aaScore = getAaScore(model.id);
+		const aaStr = fmtScore(aaScore);
+		updateStatusBar(ctx, model.id, model.cost, aaStr);
+	});
+
 	pi.on("model_select", async (event, ctx) => {
 		const { model, source } = event;
 
