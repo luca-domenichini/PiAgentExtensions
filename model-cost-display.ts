@@ -301,7 +301,7 @@ export default function (pi: ExtensionAPI) {
 
 		// Notification 2: cost + AA score
 		setTimeout(() => {
-			const costLine = `🧠 ${model.id} 💰 Cost/1M tok: Input ${fmtCost(cost.input)} | Output ${fmtCost(cost.output)} | CacheRead ${fmtCost(cost.cacheRead)}`;
+			const costLine = `🤖 ${model.id} 💰 [↑${fmtCost(cost.cacheRead)} ↑${fmtCost(cost.input)} ↓${fmtCost(cost.output)} /1M]`;
 			ctx.ui.notify(`${costLine} | AA Intelligence: ${aaStr}${fromFile}`, "info");
 		}, 300);
 
