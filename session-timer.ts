@@ -3,17 +3,25 @@
  *
  * Tracks cumulative time the agent spends actively processing
  * (running prompts, tool calls, retries, auto-compaction, follow-ups).
- * Does NOT count idle time while the user is typing or waiting.
+ * Does NOT count idle time while the user is typing or waiting, nor
+ * time spent blocked on user-facing UI prompts (confirm/select/input/
+ * editor/custom), reported via the ui_prompt_start/ui_prompt_end events.
  *
  * The time appears on the same line as "↑1.6k ↓160 0.0%/200k" via
  * ctx.ui.setStatus(), which Pi renders in the footer alongside
  * other extension statuses and the model name.
  *
  * Lifecycle:
- *   agent_start  ─► resume timer (if paused)
- *   agent_settled ─► pause timer, accumulate elapsed
- *   session_start ─► reset accumulator
- *   session_shutdown ─► clean up
+ *   agent_start      ─► resume timer (if paused)
+ *   ui_prompt_start  ─► pause timer (waiting for user), show ⏸
+ *   ui_prompt_end    ─► resume timer (only if agent still running)
+ *   agent_settled    ─► pause timer, accumulate elapsed, persist
+ *   session_start    ─► restore accumulator ("resume"/"reload") or reset
+ *   session_shutdown ─► pause, persist, clean up
+ *
+ * Persistence: accumulated time is saved as a custom session entry
+ * ("session-timer-state") via pi.appendEntry() so it survives
+ * /resume and /reload of the same session file.
  *
  * Format: "5s", "3m 42s", "1h 05m", "23h 59m"
  */
@@ -45,6 +53,7 @@ function formatElapsed(ms: number): string {
 // Timer state
 // ---------------------------------------------------------------------------
 const STATUS_KEY = "session-timer";
+const STATE_ENTRY_TYPE = "session-timer-state";
 
 export default function (pi: ExtensionAPI) {
 	// Accumulated active time from completed runs (ms)
@@ -52,6 +61,12 @@ export default function (pi: ExtensionAPI) {
 
 	// Timestamp when the current active run started, or 0 if paused
 	let runStartTime = 0;
+
+	// True while a low-level agent run is in progress (agent_start..agent_settled)
+	let agentRunning = false;
+
+	// True while Pi is blocked on a user-facing UI prompt (coalesced by Pi)
+	let waitingForUser = false;
 
 	// Interval timer for updating the footer display
 	let displayInterval: ReturnType<typeof setInterval> | null = null;
@@ -93,6 +108,30 @@ export default function (pi: ExtensionAPI) {
 	}
 
 	// -----------------------------------------------------------------------
+	// Persistence
+	// -----------------------------------------------------------------------
+
+	function persistTimer() {
+		pauseRun();
+		pi.appendEntry(STATE_ENTRY_TYPE, { accumulatedMs });
+	}
+
+	function restoreTimer(ctx: ExtensionContext) {
+		// Find the latest saved state on the current branch
+		for (let i = ctx.sessionManager.getBranch().length - 1; i >= 0; i--) {
+			const entry = ctx.sessionManager.getBranch()[i];
+			if (entry.type === "custom" && entry.customType === STATE_ENTRY_TYPE) {
+				const data = entry.data as { accumulatedMs?: number } | undefined;
+				if (typeof data?.accumulatedMs === "number") {
+					accumulatedMs = data.accumulatedMs;
+					return true;
+				}
+			}
+		}
+		return false;
+	}
+
+	// -----------------------------------------------------------------------
 	// Footer display
 	// -----------------------------------------------------------------------
 
@@ -101,12 +140,14 @@ export default function (pi: ExtensionAPI) {
 		const elapsed = getCurrentMs();
 		const formatted = formatElapsed(elapsed);
 
-		// Show a subtle pulse indicator when the agent is actively running
-		const icon = runStartTime > 0 ? "⏳" : "⏱";
+		// ⏳ agent actively running · ⏸ blocked on a user prompt · ⏱ idle
+		const icon = waitingForUser ? "⏸" : runStartTime > 0 ? "⏳" : "⏱";
 		setStatusFn(STATUS_KEY, `${icon}  ${formatted}`);
 	}
 
 	function startDisplay(ctx: ExtensionContext) {
+		if (!ctx.hasUI) return; // No footer in print/JSON mode
+
 		setStatusFn = ctx.ui.setStatus.bind(ctx.ui);
 		updateDisplay();
 
@@ -129,25 +170,51 @@ export default function (pi: ExtensionAPI) {
 	// Extension events
 	// -----------------------------------------------------------------------
 
-	// Session lifecycle ── reset on new session, clean up on shutdown
-	pi.on("session_start", async (_event, ctx) => {
+	// Session lifecycle ── restore on resume/reload, reset otherwise, clean up on shutdown
+	pi.on("session_start", async (event, ctx) => {
 		resetTimer();
+		agentRunning = false;
+		waitingForUser = false;
+		if (event.reason === "resume" || event.reason === "reload") {
+			restoreTimer(ctx);
+		}
 		startDisplay(ctx);
 	});
 
 	pi.on("session_shutdown", async () => {
-		pauseRun();
+		persistTimer();
 		stopDisplay();
 	});
 
 	// Agent lifecycle ── count only active processing time
 	pi.on("agent_start", async () => {
+		agentRunning = true;
 		resumeRun();
 		updateDisplay();
 	});
 
 	pi.on("agent_settled", async () => {
+		agentRunning = false;
 		pauseRun();
+		persistTimer();
+		updateDisplay();
+	});
+
+	// User-facing prompts ── don't count time the user spends answering
+	// (nested/overlapping prompts are coalesced by Pi into one outer span)
+	pi.on("ui_prompt_start", async () => {
+		waitingForUser = true;
+		pauseRun();
+		updateDisplay();
+	});
+
+	pi.on("ui_prompt_end", async () => {
+		waitingForUser = false;
+		// Only resume if the agent is still processing; a prompt may have
+		// been the last thing before agent_settled, or fired while idle.
+		if (agentRunning) {
+			resumeRun();
+		}
 		updateDisplay();
 	});
 
@@ -176,9 +243,13 @@ export default function (pi: ExtensionAPI) {
 				n < 1000 ? `${n}` : `${(n / 1000).toFixed(1)}k`;
 
 			const model = ctx.model?.id ?? "none";
-			const status = runStartTime > 0 ? " (agent running)" : "";
+			const state = waitingForUser
+				? " (waiting for user)"
+				: runStartTime > 0
+					? " (agent running)"
+					: "";
 			ctx.ui.notify(
-				`⏱ Agent time: ${formatted}${status}  |  ↑${fmt(input)} ↓${fmt(output)}  |  ${model}`,
+				`⏱ Agent time: ${formatted}${state}  |  ↑${fmt(input)} ↓${fmt(output)}  |  ${model}`,
 				"info",
 			);
 		},
