@@ -32,7 +32,7 @@ function updateStatusBar(
 ) {
 	ctx.ui.setStatus(
 		"model-cost",
-		`🤖 ${modelId} [↑${fmtCost(cost.input)} ↓${fmtCost(cost.output)}/1M]`,
+		`🤖 [↑${fmtCost(cost.input)} ↓${fmtCost(cost.output)}/1M]`,
 	);
 }
 
