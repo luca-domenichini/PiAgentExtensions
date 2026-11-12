@@ -1,0 +1,12 @@
+--- a/src/providers/assemblyai-stream.ts	2026-11-11 12:11:24.277193500 +0100
++++ b/src/providers/assemblyai-stream.ts	2026-11-11 12:11:24.227199300 +0100
+@@ -27,7 +27,8 @@
+     encoding: "pcm_s16le",
+     speech_model: config.model,
+   });
+-  if (config.mode) params.set("mode", config.mode);
++  // local patch: AssemblyAI rejects 'mode' for non universal-3 models (e.g. universal-streaming-*)
++  if (config.mode && config.model.startsWith("universal-3")) params.set("mode", config.mode);
+   if (config.formatTurns) params.set("format_turns", "true");
+   if (config.inactivitySeconds > 0)
+     params.set("inactivity_timeout", String(config.inactivitySeconds));
