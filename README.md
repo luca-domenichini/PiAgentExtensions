@@ -5,6 +5,7 @@ Extensions for [pi](https://github.com/earendil-works/pi). Drop a `.ts` file fro
 | Extension | What it does | Command |
 |---|---|---|
 | `agents-prompts.ts` | Loads prompt templates from `.agents/prompts/` in the project | `/reload` to pick up |
+| `context-usage.ts` | Lets the agent check how full its context window is | tool `context_usage` |
 | `fuzzy-file-mention.ts` | Fuzzy `@file` mentions | `@token` in the editor |
 | `lm-studio-dynamic.ts` | Syncs local LM Studio models into `models.json` | — |
 | `model-cost-display.ts` | Model cost in the footer + details on demand | `/cost` |
@@ -13,6 +14,12 @@ Extensions for [pi](https://github.com/earendil-works/pi). Drop a `.ts` file fro
 ## agents-prompts.ts
 
 Makes pi discover `*.md` prompt templates from `.agents/prompts/` in the current working directory, in addition to the built-in locations (`~/.pi/agent/prompts/`, `.pi/prompts/`, packages, settings, CLI). Mirrors pi's existing auto-scan of `.agents/skills/`. Invoke with `/<filename>`. `resources_discover` fires on startup and `/reload`, so new or edited prompts are picked up after a reload.
+
+## context-usage.ts
+
+Registers a `context_usage` tool so the agent can see how full its context window is, e.g. before starting long work. It returns percent used, tokens used / window size, and tokens left, based on `ctx.getContextUsage()`.
+
+Reporting only — the extension never compacts or trims anything; what to do with the number is the agent's or your call. Two edge cases are reported instead of a number: no active model (`undefined`) and the moment right after compaction, when the token count is unknown but the window size is still shown.
 
 ## fuzzy-file-mention.ts
 
